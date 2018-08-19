@@ -69,6 +69,39 @@ enum OLED_params {
 	OLED_FILL = 0x02		/* Fill the area	      */
 };
 
+
+/********************* PUT REGION *********************/
+/******************************************************/
+enum position {
+	TOP_LEFT = 0xA0,// some random value to avoid collisions
+	TOP_RIGHT,
+	BOT_LEFT,
+	BOT_RIGHT,
+	CENTER
+};
+
+enum fill_type {
+	FILL_WHITE = 0x00,
+	FILL_BLACK = 0xFF,
+	FILL_PICTURE = 0x01,
+};
+
+#define TOP_BITS 39
+#define BOT_BITS 49
+
+enum operations {
+	REPLACE = 0,
+	AND,
+	OR,
+	NAND,
+	NOR,
+	XOR,
+};
+/******************************************************/
+/******************************************************/
+
+
+
 /* Lock type. Need to be volatile to prevent optimizations */
 /* 1 means unlocked, 0 means locked */
 typedef volatile uint8_t	lock_t;
@@ -276,3 +309,31 @@ OLED_err OLED_put_pixel(OLED *oled, uint8_t x, uint8_t y, bool pixel_state);
  * (!) Notice: method is not atomic. If required, protect it with lock
  */
 OLED_err OLED_put_rectangle(OLED *oled, uint8_t x_from, uint8_t y_from, uint8_t x_to, uint8_t y_to, enum OLED_params params);
+
+
+
+
+/********************* PUT REGION *********************/
+/******************************************************/
+
+/**
+ * OLED_put_region() - function draws pictures or fill rectangle regions with black and white.
+ * All type of masked operations are available.
+ * Region can be paced with a different orientation, depending on enum position parameter.
+ * Error check present, if picture went out of bounds, or the wrong parameter was set, an error message will be printed on the screen.
+ * @oled: OLED object.
+ * @collums: number of columns.
+ * @rows: number of rows.
+ * @data_arr: pointer to the data array, if FILL operations will be performed need to set NULL.
+ * @x_begin: OLED x - beginning coordinates.
+ * @y_begim: OLED y - beginning coordinates.
+ * @arr_flag: fill_type flag, OLED filled with picture or color.
+ * @op_flag: mask operations.
+ * @pos_flag: chooses which corner is set as beginning coordinates.
+ * 
+ */
+OLED_err OLED_put_region(OLED *oled, uint8_t collums, uint8_t rows , const uint8_t * const data_arr, 
+int8_t x_begin, int8_t y_begin, enum fill_type arr_flag, enum operations op_flag, enum position pos_flag);
+
+/******************************************************/
+/******************************************************/

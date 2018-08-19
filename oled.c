@@ -333,3 +333,262 @@ OLED_err OLED_put_rectangle(OLED *oled, uint8_t x_from, uint8_t y_from, uint8_t 
 
 	return OLED_EOK;
 }
+
+
+/********************* PUT REGION *********************/
+/******************************************************/
+
+static void _put_reg_repl(uint8_t *a, uint8_t *b)
+{
+	*a = *b;
+}
+static void _put_reg_and(uint8_t *a, uint8_t *b)
+{
+	*a &= *b;
+}
+static void _put_reg_or(uint8_t *a, uint8_t *b)
+{
+	*a |= *b;
+}
+static void _put_reg_nand(uint8_t *a, uint8_t *b)
+{
+	*a &= ~(*b);
+}
+static void _put_reg_nor(uint8_t *a, uint8_t *b)
+{
+	*a |= ~(*b);
+}
+static void _put_reg_xor(uint8_t *a, uint8_t *b)
+{
+	*a ^= *b;
+}
+
+static void (*func_ptr[])(uint8_t *, uint8_t *) = {_put_reg_repl, _put_reg_and, _put_reg_or,
+ 						_put_reg_nand, _put_reg_nor, _put_reg_xor};
+
+/**
+ * _print_error - prints ann error message 
+ * in the middle of the screen.
+ * 
+ */
+static void _print_error(OLED *oled, OLED_err err) {
+	
+	uint8_t err_message[] = {
+		0xFF, 0xFF, 0xDB, 0xDB, 0xDB,		//E
+		0x00, 0x00, 0xFF, 0xFF, 0x03, 0x03,	//r
+		0x00, 0x00, 0xFF, 0xFF, 0x03, 0x03	//r
+	};
+	/* fill region */
+	OLED_put_region(oled, 39, 3, err_message, 47, 16, FILL_WHITE, REPLACE, TOP_LEFT);
+	/* print Err on top */
+	OLED_put_region(oled, 17, 1, err_message, 54, 24, FILL_PICTURE, REPLACE, TOP_LEFT);
+		
+	if (err == OLED_EPARAMS) {	// P letter
+		uint8_t err_PARAM[] = {
+			0xFF, 0xFF,
+			0x09, 0x09,
+			0x0F
+		};
+		OLED_put_region(oled, 5, 1, err_PARAM, 75, 24, FILL_PICTURE, REPLACE, TOP_LEFT);
+	}
+	if (err == OLED_EBOUNDS) {	// B letter
+		uint8_t err_BOUNDS[] = {
+			0xFF, 0x99,
+			0x99, 0x9F,
+			0xF0
+		};
+		OLED_put_region(oled, 5, 1, err_BOUNDS, 75, 24, FILL_PICTURE, REPLACE, TOP_LEFT);
+	}	
+}
+
+/**
+ * _put_region_fill_bits -  sub function of OLED_put_region.
+ * Fills top and bottom bits.
+ */
+static OLED_err _put_region_fill_bits(OLED *oled, uint16_t x_start, uint16_t x_stop, uint8_t offset,
+uint8_t and_mask, enum fill_type colour_byte, enum operations op_flag, enum operations bits_pos)
+{
+	uint8_t bits; 
+	if (bits_pos == TOP_BITS) {
+		bits = colour_byte << offset;
+	} else if (bits_pos == BOT_BITS) {
+		bits = colour_byte >> offset;
+	}
+	else {
+		return OLED_EPARAMS;
+	}
+
+	uint8_t mask_or_xor_nand = bits;
+	uint8_t mask_and_nor = bits | and_mask;
+
+	for (uint16_t i = x_start; i < x_stop; i++) {
+		if (op_flag == REPLACE) {
+			oled->frame_buffer[i] |= bits;
+			oled->frame_buffer[i] &= (bits | and_mask);
+		} else if (op_flag == OR || op_flag == XOR || op_flag == NAND) {
+			func_ptr[op_flag](&oled->frame_buffer[i], &mask_or_xor_nand);
+		} else if (op_flag == AND || op_flag == NOR) {
+			func_ptr[op_flag](&oled->frame_buffer[i], &mask_and_nor);
+		} 
+		else {
+			return OLED_EPARAMS;
+		}
+	}
+	return OLED_EOK;
+}
+
+
+
+OLED_err OLED_put_region(OLED *oled,  uint8_t col,  uint8_t row, const uint8_t *const data, 
+		int8_t x_begin, int8_t y_begin, enum fill_type arr_flag, enum operations op_flag,
+		enum position corner_pos)
+{
+	OLED_err err = OLED_EOK;
+
+	if (corner_pos != TOP_LEFT) {
+		switch (corner_pos) {
+		case TOP_RIGHT: 
+			x_begin -= col;
+			break;
+		case BOT_LEFT: 
+			y_begin -= row * 8;
+			break;
+		case BOT_RIGHT: 
+			x_begin -= col;
+			y_begin -= row * 8;
+			break;
+		case CENTER:
+			x_begin -= col / 2;
+			y_begin -= row * 8 / 2;
+			break;
+		default: 
+			err = OLED_EPARAMS;
+			_print_error(oled, err);
+			return err;
+		}
+	}
+
+	if (x_begin < 0 || x_begin > 127 || y_begin < 0 || y_begin  > 63 || col > 127
+		|| row > 8 || x_begin + col - 1 > 127 || y_begin + row * 8 - 1 > 63) {
+		err = OLED_EBOUNDS;
+		_print_error(oled, err);
+		return err;
+	}
+
+	if (op_flag < REPLACE || op_flag > XOR) {
+		err = OLED_EPARAMS;
+		_print_error(oled, err);
+		return err;
+	}
+
+	uint8_t start_page = y_begin / 8; // display page.
+	uint8_t stop_page = start_page + row;
+	uint16_t indx = 0; // data array index
+	uint16_t x_start; // x_start, x_stop - fb array indexes
+	uint16_t x_stop;
+
+	OLED_spinlock(oled);
+
+	if (y_begin % 8 == 0) {
+		for (uint8_t page = start_page; page < stop_page; page++) {
+			x_start = (page << 7) + x_begin;
+			x_stop = x_start + col;
+			if (arr_flag == FILL_PICTURE) {
+				for (uint16_t i = x_start; i < x_stop; i++, indx++) {
+					func_ptr[op_flag](&oled->frame_buffer[i], &data[indx]);
+				}
+			} else if (arr_flag == FILL_BLACK || arr_flag == FILL_WHITE) {
+				for (uint16_t i = x_start; i < x_stop; i++) {
+					func_ptr[op_flag](&oled->frame_buffer[i], &arr_flag);
+				}
+			} else {
+				err = OLED_EPARAMS;
+				_print_error(oled, err);
+				return err;
+			}
+		}
+		return err;
+	}
+	
+	uint8_t top_offset = y_begin % 8;
+	uint8_t bot_offset = 8 - y_begin % 8;
+
+	uint8_t top_and_mask = 0xFF >> bot_offset;
+	uint8_t bot_and_mask = 0xFF << top_offset;
+
+	if (arr_flag == FILL_BLACK || arr_flag == FILL_WHITE) {
+
+		/* fill top bits */
+		x_start = (start_page << 7) + x_begin;
+		x_stop = x_start + col;
+		err = _put_region_fill_bits(oled, x_start, x_stop, top_offset, 
+				top_and_mask, arr_flag, op_flag, TOP_BITS);
+
+		/* fill bottom bits */
+		x_start = (stop_page << 7) + x_begin;
+		x_stop = x_start + col;
+		err = _put_region_fill_bits(oled, x_start, x_stop, bot_offset, 
+				bot_and_mask, arr_flag, op_flag, BOT_BITS);
+		
+		/* fill bytes */
+		for (uint8_t page = start_page + 1; page < stop_page; page++) {
+			x_start = (page << 7) + x_begin;
+			x_stop = x_start + col;
+			for (uint16_t i = x_start; i < x_stop; i++) {
+				func_ptr[op_flag](&oled->frame_buffer[i], &arr_flag);
+			}
+		}
+		return err;
+	}
+				
+	if (arr_flag == FILL_PICTURE) {
+					
+		const uint8_t top_read_mask = 0xFF << bot_offset;
+		const uint8_t bot_read_mask = 0xFF >> top_offset;
+
+		uint16_t i = (start_page << 7) + x_begin;
+		/* move thrue picture array */
+		for (uint8_t indx = 0; indx < col * row; indx++, i++) {
+			
+			/* when we finish write row, move to the next page */
+			if (indx % col == 0 && indx > 0) {
+				i = ((++start_page) << 7) + x_begin;
+			}
+
+			/* read top and bottom bits of a single byte of the data array */
+			uint8_t top_bits = (data[indx] | top_read_mask);
+			uint8_t bot_bits = (data[indx] | bot_read_mask);
+
+			/* prepare to write bits */
+			top_bits <<= top_offset;
+			bot_bits >>= bot_offset;
+			
+			/* creating masks */
+			uint8_t mask_or_xor_nand_top = top_bits;
+			uint8_t mask_or_xor_nand_bot = bot_bits;
+			uint8_t mask_and_nor_top = top_bits | top_and_mask;
+			uint8_t mask_and_nor_bot = bot_bits | bot_and_mask;
+			
+			if (op_flag == REPLACE) {
+				oled->frame_buffer[i] |= mask_or_xor_nand_top;
+				oled->frame_buffer[i] &= mask_and_nor_top;
+				oled->frame_buffer[i + 128] |= mask_or_xor_nand_bot;
+				oled->frame_buffer[i + 128] &= mask_and_nor_bot;	 
+			} else if (op_flag == OR || op_flag == XOR || op_flag == NAND) {
+				func_ptr[op_flag](&oled->frame_buffer[i], &mask_or_xor_nand_top);
+				func_ptr[op_flag](&oled->frame_buffer[i + 128], &mask_or_xor_nand_bot);
+			} else if (op_flag == AND || op_flag == NOR) {
+				func_ptr[op_flag](&oled->frame_buffer[i], &mask_and_nor_top);
+				func_ptr[op_flag](&oled->frame_buffer[i + 128], &mask_and_nor_bot);
+			}
+		}
+		return err;
+	}
+	/* if arr_flag did not match, return an error */
+	err = OLED_EPARAMS;
+	_print_error(oled, err);
+	return err;
+}
+
+/******************************************************/
+/******************************************************/
