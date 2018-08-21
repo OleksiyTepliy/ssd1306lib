@@ -86,9 +86,6 @@ enum fill_type {
 	FILL_PICTURE = 0x01,
 };
 
-#define TOP_BITS 39
-#define BOT_BITS 49
-
 enum operations {
 	REPLACE = 0,
 	AND,
