@@ -363,6 +363,7 @@ static void _put_reg_xor(uint8_t *a, uint8_t *b)
 	*a ^= *b;
 }
 
+/* array of function pointers for masked operations */
 static void (*func_ptr[])(uint8_t *, uint8_t *) = {_put_reg_repl, _put_reg_and, _put_reg_or,
  						_put_reg_nand, _put_reg_nor, _put_reg_xor};
 
@@ -372,17 +373,17 @@ static void (*func_ptr[])(uint8_t *, uint8_t *) = {_put_reg_repl, _put_reg_and, 
  * 
  */
 static void _print_error(OLED *oled, OLED_err err) {
-	
+	/* if an error occurs we print Err depending on error parameters */
 	uint8_t err_message[] = {
 		0xFF, 0xFF, 0xDB, 0xDB, 0xDB,		//E
 		0x00, 0x00, 0xFF, 0xFF, 0x03, 0x03,	//r
 		0x00, 0x00, 0xFF, 0xFF, 0x03, 0x03	//r
 	};
-	/* fill region */
+	/* Fill region in the center of the screen */
 	OLED_put_region(oled, 39, 3, err_message, 47, 16, FILL_WHITE, REPLACE, TOP_LEFT);
-	/* print Err on top */
+	/* print an error message on top of it */
 	OLED_put_region(oled, 17, 1, err_message, 54, 24, FILL_PICTURE, REPLACE, TOP_LEFT);
-		
+	
 	if (err == OLED_EPARAMS) {	// P letter
 		uint8_t err_PARAM[] = {
 			0xFF, 0xFF,
@@ -401,12 +402,16 @@ static void _print_error(OLED *oled, OLED_err err) {
 	}	
 }
 
+/* flags for _put_region_fill_bits func */
+static const uint8_t TOP_BITS = 1;
+static const uint8_t BOT_BITS = 0;
+
 /**
  * _put_region_fill_bits -  sub function of OLED_put_region.
  * Fills top and bottom bits.
  */
 static OLED_err _put_region_fill_bits(OLED *oled, uint16_t x_start, uint16_t x_stop, uint8_t offset,
-uint8_t and_mask, enum fill_type colour_byte, enum operations op_flag, enum operations bits_pos)
+uint8_t and_mask, enum fill_type colour_byte, enum operations op_flag, uint8_t bits_pos)
 {
 	uint8_t bits; 
 	if (bits_pos == TOP_BITS) {
@@ -467,7 +472,8 @@ OLED_err OLED_put_region(OLED *oled,  uint8_t col,  uint8_t row, const uint8_t *
 			return err;
 		}
 	}
-
+	
+	/* if picture went out of bounds, we printing an error message */
 	if (x_begin < 0 || x_begin > 127 || y_begin < 0 || y_begin  > 63 || col > 127
 		|| row > 8 || x_begin + col - 1 > 127 || y_begin + row * 8 - 1 > 63) {
 		err = OLED_EBOUNDS;
@@ -487,8 +493,7 @@ OLED_err OLED_put_region(OLED *oled,  uint8_t col,  uint8_t row, const uint8_t *
 	uint16_t x_start; // x_start, x_stop - fb array indexes
 	uint16_t x_stop;
 
-	OLED_spinlock(oled);
-
+	/* When coordinates y_begin multiples of 8, we just filling bytes */
 	if (y_begin % 8 == 0) {
 		for (uint8_t page = start_page; page < stop_page; page++) {
 			x_start = (page << 7) + x_begin;
